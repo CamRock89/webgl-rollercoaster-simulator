@@ -1,18 +1,14 @@
 <!DOCTYPE html>
 <html>
 
-<style>
-    canvas {
-        background: black;
-    }
-</style>
-
 <script id="vertex-shader" type="x-shader/x-vertex">
 
 attribute vec4 vPosition;
 attribute vec4 vColor;
+attribute vec2 vTexCoord;
 
 varying vec4 fColor;
+varying vec2 fTexCoord;
 
 uniform mat4 modelView;
 uniform mat4 projection;
@@ -21,6 +17,7 @@ void main()
 {
     gl_Position = projection * modelView * vPosition;
     fColor = vColor;
+    fTexCoord = vTexCoord;
 }
 
 </script>
@@ -30,10 +27,21 @@ void main()
 precision mediump float;
 
 varying vec4 fColor;
+varying vec2 fTexCoord;
+
+uniform sampler2D terrainTexture;
+uniform int useTexture;
 
 void main()
 {
-    gl_FragColor = fColor;
+    if (useTexture == 1)
+    {
+        gl_FragColor = texture2D(terrainTexture, fTexCoord);
+    }
+    else
+    {
+        gl_FragColor = fColor;
+    }
 }
 
 </script>
@@ -46,6 +54,11 @@ void main()
 <button id="Button4">Theta -</button>
 <button id="Button5">Phi +</button>
 <button id="Button6">Phi -</button>
+
+<p></p>
+
+<label>Load Terrain Texture:</label>
+<input type="file" id="heightmapInput" accept="image/*">
 
 <p></p>
 
