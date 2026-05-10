@@ -27,7 +27,7 @@ var eye;
 const at = vec3(0.0, 0.0, 0.0);
 const up = vec3(0.0, 1.0, 0.0);
 
-var radius = 9.0;
+var radius = 15.0;
 var theta = 45.0 * Math.PI / 180.0;
 var phi = 45.0 * Math.PI / 180.0;
 
@@ -63,16 +63,23 @@ var skyboxCount = 0;
 var trackStart = 0;
 var trackCount = 0;
 
-var cameraMode = "orbit";
+var cameraMode = "auto";
 
 var cameraPos = vec3(0.0, 3.0, 12.0);
+var yaw = -90.0;
+var pitch = 0.0;
+
 var cameraForward = vec3(0.0, 0.0, -1.0);
 var cameraSpeed = 0.25;
+
+var smoothAutoEye = vec3(0.0, 3.0, 12.0);
+var smoothAutoAt = vec3(0.0, 3.0, 11.0);
+var cameraSmoothness = 0.08;
 
 var keys = {};
 
 var autoT = 0.0;
-var autoSpeed = 0.003;
+var autoSpeed = 0.0025;
 
 
 function addVec(a, b)
@@ -102,6 +109,24 @@ function normalizeVec(v)
     return vec3(v[0] / len, v[1] / len, v[2] / len);
 }
 
+function updateCameraDirection()
+{
+    var yawRad = yaw * Math.PI / 180.0;
+    var pitchRad = pitch * Math.PI / 180.0;
+
+    var x = Math.cos(yawRad) * Math.cos(pitchRad);
+    var y = Math.sin(pitchRad);
+    var z = Math.sin(yawRad) * Math.cos(pitchRad);
+
+    cameraForward = normalizeVec(vec3(x, y, z));
+}
+
+function smoothStep(edge0, edge1, x)
+{
+    var t = Math.max(0.0, Math.min(1.0, (x - edge0) / (edge1 - edge0)));
+    return t * t * (3.0 - 2.0 * t);
+}
+
 
 function hill(x, z, cx, cz, height, width)
 {
@@ -125,20 +150,16 @@ function generateTerrainData(rows, cols)
 
             var y = 0.0;
 
-            // large hill
             y += hill(x, z, -10.0, -10.0, 4.0, 20.0);
 
-            // two med hills
             y += hill(x, z, 2.4, -3.0, 0.55, 0.8);
             y += hill(x, z, 3.3, -2.3, 0.45, 0.7);
 
-            // four small hills
             y += hill(x, z, -10.0, 8.0, 1.5, 7.0);
             y += hill(x, z, -7.0, 11.0, 1.3, 7.0);
             y += hill(x, z, -12.0, 11.0, 1.2, 6.0);
             y += hill(x, z, -7.5, 7.5, 1.1, 6.0);
 
-            // rolling ground
             y += 0.18 * Math.sin(0.6 * x);
             y += 0.14 * Math.cos(0.6 * z);
 
@@ -287,40 +308,144 @@ function buildSkybox()
 }
 
 
-// Cameron addition: roller coaster path
+// Smoother coaster path with hills, valleys, and less harsh slope changes.
 function getTrackPoint(t)
 {
+    t = t % 1.0;
+
+    if (t < 0.0)
+    {
+        t += 1.0;
+    }
+
     var angle = t * 2.0 * Math.PI;
 
-    var x = 9.0 * Math.cos(angle);
-    var z = 9.0 * Math.sin(angle);
-    var y = 2.2 + 1.2 * Math.sin(2.0 * angle);
+    var radiusBase =
+        8.0
+        + 1.1 * Math.sin(2.0 * angle)
+        + 0.6 * Math.cos(3.0 * angle);
+
+    var x = radiusBase * Math.cos(angle);
+    var z = radiusBase * Math.sin(angle);
+
+    var y =
+        2.2
+        + 1.4 * Math.sin(angle)
+        + 0.9 * Math.sin(2.0 * angle + 0.8)
+        + 0.4 * Math.cos(3.0 * angle);
+
+    y +=
+        3.0
+        * smoothStep(0.08, 0.18, t)
+        * (1.0 - smoothStep(0.22, 0.32, t));
+
+    y -=
+        1.8
+        * smoothStep(0.38, 0.48, t)
+        * (1.0 - smoothStep(0.55, 0.65, t));
+
+    y +=
+        2.3
+        * smoothStep(0.66, 0.76, t)
+        * (1.0 - smoothStep(0.83, 0.93, t));
 
     return vec3(x, y, z);
 }
 
 
-// Cameron addition: visible roller coaster track
+function addThickLine(p1, p2, thickness, color)
+{
+    var dir = normalizeVec(subVec(p2, p1));
+    var side = normalizeVec(cross(dir, up));
+
+    if (side[0] === 0 && side[1] === 0 && side[2] === 0)
+    {
+        side = vec3(1.0, 0.0, 0.0);
+    }
+
+    var vertical = vec3(0.0, thickness, 0.0);
+    var offset = scaleVec(side, thickness);
+
+    var a = addVec(addVec(p1, offset), vertical);
+    var b = addVec(subVec(p1, offset), vertical);
+    var c = subVec(subVec(p1, offset), vertical);
+    var d = subVec(addVec(p1, offset), vertical);
+
+    var e = addVec(addVec(p2, offset), vertical);
+    var f = addVec(subVec(p2, offset), vertical);
+    var g = subVec(subVec(p2, offset), vertical);
+    var h = subVec(addVec(p2, offset), vertical);
+
+    function pushQuad(v1, v2, v3, v4)
+    {
+        pointsArray.push(vec4(v1[0], v1[1], v1[2], 1.0));
+        colorsArray.push(color);
+        texCoordsArray.push(vec2(0.0, 0.0));
+
+        pointsArray.push(vec4(v2[0], v2[1], v2[2], 1.0));
+        colorsArray.push(color);
+        texCoordsArray.push(vec2(0.0, 0.0));
+
+        pointsArray.push(vec4(v3[0], v3[1], v3[2], 1.0));
+        colorsArray.push(color);
+        texCoordsArray.push(vec2(0.0, 0.0));
+
+        pointsArray.push(vec4(v1[0], v1[1], v1[2], 1.0));
+        colorsArray.push(color);
+        texCoordsArray.push(vec2(0.0, 0.0));
+
+        pointsArray.push(vec4(v3[0], v3[1], v3[2], 1.0));
+        colorsArray.push(color);
+        texCoordsArray.push(vec2(0.0, 0.0));
+
+        pointsArray.push(vec4(v4[0], v4[1], v4[2], 1.0));
+        colorsArray.push(color);
+        texCoordsArray.push(vec2(0.0, 0.0));
+    }
+
+    pushQuad(a, e, f, b);
+    pushQuad(d, c, g, h);
+    pushQuad(a, d, h, e);
+    pushQuad(b, f, g, c);
+}
+
+
 function buildRollerCoasterTrack()
 {
     trackStart = pointsArray.length;
 
-    var trackColor = vec4(0.55, 0.25, 0.05, 1.0);
+    var railColor = vec4(0.08, 0.08, 0.08, 1.0);
+    var tieColor = vec4(0.03, 0.03, 0.03, 1.0); 
 
-    var segments = 180;
+    var segments = 420;
+    var railOffset = 0.45;
+    var railThickness = 0.09;
+    var tieThickness = 0.07;
 
     for (var i = 0; i < segments; i++)
     {
-        var p1 = getTrackPoint(i / segments);
-        var p2 = getTrackPoint((i + 1) / segments);
+        var t1 = i / segments;
+        var t2 = (i + 1) / segments;
 
-        pointsArray.push(vec4(p1[0], p1[1], p1[2], 1.0));
-        colorsArray.push(trackColor);
-        texCoordsArray.push(vec2(0.0, 0.0));
+        var p1 = getTrackPoint(t1);
+        var p2 = getTrackPoint(t2);
 
-        pointsArray.push(vec4(p2[0], p2[1], p2[2], 1.0));
-        colorsArray.push(trackColor);
-        texCoordsArray.push(vec2(0.0, 0.0));
+        var direction = normalizeVec(subVec(p2, p1));
+        var side = normalizeVec(cross(direction, up));
+
+        var left1 = addVec(p1, scaleVec(side, railOffset));
+        var left2 = addVec(p2, scaleVec(side, railOffset));
+
+        var right1 = subVec(p1, scaleVec(side, railOffset));
+        var right2 = subVec(p2, scaleVec(side, railOffset));
+
+        addThickLine(left1, left2, railThickness, railColor);
+        addThickLine(right1, right2, railThickness, railColor);
+
+        if (i % 8 === 0)
+        {
+            addThickLine(left1, right1, tieThickness, tieColor);
+        }
     }
 
     trackCount = pointsArray.length - trackStart;
@@ -357,7 +482,7 @@ function configureTexture(image)
 }
 
 
-// Cameron addition: manual movement
+// Manual movement camera.
 function updateManualCamera()
 {
     var forward = normalizeVec(cameraForward);
@@ -383,25 +508,50 @@ function updateManualCamera()
         cameraPos = addVec(cameraPos, scaleVec(rightVec, cameraSpeed));
     }
 
-    if (keys["q"])
+    if (keys["Space"])
     {
         cameraPos = addVec(cameraPos, scaleVec(up, cameraSpeed));
     }
 
-    if (keys["e"])
+    if (keys["ShiftLeft"] || keys["ShiftRight"])
     {
         cameraPos = subVec(cameraPos, scaleVec(up, cameraSpeed));
     }
 }
 
 
-// Cameron addition: camera mode selection
+// Camera selection: auto ride POV, manual, or Anthony's orbit camera.
 function getCameraMatrix()
 {
     if (cameraMode === "auto")
     {
         var current = getTrackPoint(autoT);
         var next = getTrackPoint(autoT + 0.01);
+        var farNext = getTrackPoint(autoT + 0.025);
+
+        var direction = normalizeVec(subVec(farNext, current));
+
+        var targetEye = vec3(
+            current[0],
+            current[1] + 1.0,
+            current[2]
+        );
+
+        var targetAt = vec3(
+            next[0] + direction[0] * 2.5,
+            next[1] + 1.0 + direction[1] * 2.5,
+            next[2] + direction[2] * 2.5
+        );
+
+        smoothAutoEye = addVec(
+            smoothAutoEye,
+            scaleVec(subVec(targetEye, smoothAutoEye), cameraSmoothness)
+        );
+
+        smoothAutoAt = addVec(
+            smoothAutoAt,
+            scaleVec(subVec(targetAt, smoothAutoAt), cameraSmoothness)
+        );
 
         autoT += autoSpeed;
 
@@ -410,10 +560,7 @@ function getCameraMatrix()
             autoT = 0.0;
         }
 
-        var autoEye = vec3(current[0], current[1] + 0.7, current[2]);
-        var autoAt = vec3(next[0], next[1] + 0.7, next[2]);
-
-        return lookAt(autoEye, autoAt, up);
+        return lookAt(smoothAutoEye, smoothAutoAt, up);
     }
 
     if (cameraMode === "manual")
@@ -425,7 +572,6 @@ function getCameraMatrix()
         return lookAt(cameraPos, lookPoint, up);
     }
 
-    // Anthony's original orbit camera
     eye = vec3(
         radius * Math.sin(theta) * Math.cos(phi),
         radius * Math.sin(theta) * Math.sin(phi),
@@ -442,7 +588,10 @@ window.onload = function init()
 
     gl = WebGLUtils.setupWebGL(canvas);
 
-    if (!gl){ alert("WebGL isn't available"); }
+    if (!gl)
+    {
+        alert("WebGL isn't available");
+    }
 
     gl.viewport(0, 0, canvas.width, canvas.height);
 
@@ -556,29 +705,68 @@ window.onload = function init()
     };
 
     window.onkeydown = function(event)
+{
+    keys[event.key.toLowerCase()] = true;
+    keys[event.code] = true;
+
+    if (event.code === "Space" || event.code === "ShiftLeft" || event.code === "ShiftRight")
     {
-        keys[event.key.toLowerCase()] = true;
+        event.preventDefault();
+    }
 
-        if (event.key.toLowerCase() === "r")
-        {
-            cameraMode = "auto";
-        }
-
-        if (event.key.toLowerCase() === "m")
-        {
-            cameraMode = "manual";
-        }
-
-        if (event.key.toLowerCase() === "o")
-        {
-            cameraMode = "orbit";
-        }
-    };
-
-    window.onkeyup = function(event)
+    if (event.key.toLowerCase() === "r")
     {
-        keys[event.key.toLowerCase()] = false;
-    };
+        cameraMode = "auto";
+    }
+
+    if (event.key.toLowerCase() === "m")
+    {
+        cameraMode = "manual";
+    }
+
+    if (event.key.toLowerCase() === "o")
+    {
+        cameraMode = "orbit";
+    }
+
+    if (event.key === "ArrowLeft")
+    {
+        yaw -= 3.0;
+    }
+
+    if (event.key === "ArrowRight")
+    {
+        yaw += 3.0;
+    }
+
+    if (event.key === "ArrowUp")
+    {
+        pitch += 2.0;
+    }
+
+    if (event.key === "ArrowDown")
+    {
+        pitch -= 2.0;
+    }
+
+    if (pitch > 85.0)
+    {
+        pitch = 85.0;
+    }
+
+    if (pitch < -85.0)
+    {
+        pitch = -85.0;
+    }
+
+    updateCameraDirection();
+};
+
+window.onkeyup = function(event)
+{
+    keys[event.key.toLowerCase()] = false;
+    keys[event.code] = false;
+};
 
     render();
 };
@@ -590,25 +778,22 @@ function render()
 
     mvMatrix = getCameraMatrix();
 
-    pMatrix = ortho(left, right, bottom, ytop, near, far);
+    pMatrix = perspective(65.0, canvas.width / canvas.height, 0.1, 100.0);
 
     gl.uniformMatrix4fv(modelView, false, flatten(mvMatrix));
     gl.uniformMatrix4fv(projection, false, flatten(pMatrix));
 
-    // draw skybox
     gl.uniform1i(useTextureLoc, 0);
     gl.drawArrays(gl.TRIANGLES, skyboxStart, skyboxCount);
 
-    // draw terrain
     gl.uniform1i(useTextureLoc, useTexture);
     gl.drawArrays(gl.TRIANGLES, terrainStart, terrainCount);
 
-    // draw water
     gl.uniform1i(useTextureLoc, 0);
     gl.drawArrays(gl.TRIANGLES, waterStart, waterCount);
 
-    // draw Cameron's roller coaster track
     gl.uniform1i(useTextureLoc, 0);
+    gl.lineWidth(4.0);
     gl.drawArrays(gl.LINES, trackStart, trackCount);
 
     requestAnimFrame(render);
