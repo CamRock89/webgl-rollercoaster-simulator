@@ -7,6 +7,7 @@ var program;
 var pointsArray = [];
 var colorsArray = [];
 var texCoordsArray = [];
+var normalsArray = [];
 
 var modelView;
 var projection;
@@ -14,14 +15,18 @@ var projection;
 var vBuffer;
 var cBuffer;
 var tBuffer;
+var nBuffer;
 
 var terrainTexture;
-var useTextureLoc;
 var useTexture = 0;
+
+var uSurfaceTypeLoc;
+var uUseTextureLoc;
+var uIsWaterLoc;
+var uTimeLoc;
 
 var mvMatrix;
 var pMatrix;
-
 var eye;
 
 const at = vec3(0.0, 0.0, 0.0);
@@ -30,45 +35,33 @@ const up = vec3(0.0, 1.0, 0.0);
 var radius = 15.0;
 var theta = 45.0 * Math.PI / 180.0;
 var phi = 45.0 * Math.PI / 180.0;
-
 var dr = 5.0 * Math.PI / 180.0;
 
 var left = -15.0;
 var right = 15.0;
 var ytop = 15.0;
 var bottom = -15.0;
-
 var near = -50.0;
 var far = 50.0;
 
-// terrain settings
 var terrainRows = 150;
 var terrainCols = 150;
-
 var terrainSize = 30.0;
 var terrainData = [];
 
 var terrainStart = 0;
 var terrainCount = 0;
-
-// water settings
 var waterStart = 0;
 var waterCount = 0;
-
-// skybox settings
 var skyboxStart = 0;
 var skyboxCount = 0;
-
-// Cameron additions
 var trackStart = 0;
 var trackCount = 0;
 
 var cameraMode = "auto";
-
 var cameraPos = vec3(0.0, 3.0, 12.0);
 var yaw = -90.0;
 var pitch = 0.0;
-
 var cameraForward = vec3(0.0, 0.0, -1.0);
 var cameraSpeed = 0.25;
 
@@ -81,6 +74,8 @@ var keys = {};
 var autoT = 0.0;
 var autoSpeed = 0.0025;
 
+var TWO_PI = 2.0 * Math.PI;
+var startTime = null;
 
 function addVec(a, b)
 {
@@ -127,7 +122,6 @@ function smoothStep(edge0, edge1, x)
     return t * t * (3.0 - 2.0 * t);
 }
 
-
 function hill(x, z, cx, cz, height, width)
 {
     var dx = x - cx;
@@ -135,7 +129,6 @@ function hill(x, z, cx, cz, height, width)
 
     return height * Math.exp(-(dx * dx + dz * dz) / width);
 }
-
 
 function generateTerrainData(rows, cols)
 {
@@ -147,19 +140,15 @@ function generateTerrainData(rows, cols)
         {
             var x = terrainSize * i / rows - terrainSize / 2;
             var z = terrainSize * j / cols - terrainSize / 2;
-
             var y = 0.0;
 
             y += hill(x, z, -10.0, -10.0, 4.0, 20.0);
-
             y += hill(x, z, 2.4, -3.0, 0.55, 0.8);
             y += hill(x, z, 3.3, -2.3, 0.45, 0.7);
-
             y += hill(x, z, -10.0, 8.0, 1.5, 7.0);
             y += hill(x, z, -7.0, 11.0, 1.3, 7.0);
             y += hill(x, z, -12.0, 11.0, 1.2, 6.0);
             y += hill(x, z, -7.5, 7.5, 1.1, 6.0);
-
             y += 0.18 * Math.sin(0.6 * x);
             y += 0.14 * Math.cos(0.6 * z);
 
@@ -175,6 +164,21 @@ function generateTerrainData(rows, cols)
     }
 }
 
+function terrainNormal(i, j)
+{
+    var iL = Math.max(i - 1, 0);
+    var iR = Math.min(i + 1, terrainRows - 1);
+    var jD = Math.max(j - 1, 0);
+    var jU = Math.min(j + 1, terrainCols - 1);
+
+    var dx = terrainSize / terrainRows * 2.0;
+    var dz = terrainSize / terrainCols * 2.0;
+
+    var dydx = (terrainData[iR][j] - terrainData[iL][j]) / dx;
+    var dydz = (terrainData[i][jU] - terrainData[i][jD]) / dz;
+
+    return normalizeVec(vec3(-dydx, 1.0, -dydz));
+}
 
 function buildTerrain()
 {
@@ -186,7 +190,6 @@ function buildTerrain()
         {
             var x1 = terrainSize * i / terrainRows - terrainSize / 2;
             var x2 = terrainSize * (i + 1) / terrainRows - terrainSize / 2;
-
             var z1 = terrainSize * j / terrainCols - terrainSize / 2;
             var z2 = terrainSize * (j + 1) / terrainCols - terrainSize / 2;
 
@@ -197,118 +200,135 @@ function buildTerrain()
 
             var s1 = i / terrainRows;
             var s2 = (i + 1) / terrainRows;
-
             var t1 = j / terrainCols;
             var t2 = (j + 1) / terrainCols;
 
             var green1 = vec4(0.0, 0.45, 0.0, 1.0);
             var green2 = vec4(0.0, 0.65, 0.0, 1.0);
 
+            var n00 = terrainNormal(i, j);
+            var n10 = terrainNormal(i + 1, j);
+            var n11 = terrainNormal(i + 1, j + 1);
+            var n01 = terrainNormal(i, j + 1);
+
             pointsArray.push(vec4(x1, y1, z1, 1.0));
             colorsArray.push(green1);
             texCoordsArray.push(vec2(s1, t1));
+            normalsArray.push(n00);
 
             pointsArray.push(vec4(x2, y2, z1, 1.0));
             colorsArray.push(green2);
             texCoordsArray.push(vec2(s2, t1));
+            normalsArray.push(n10);
 
             pointsArray.push(vec4(x2, y3, z2, 1.0));
             colorsArray.push(green1);
             texCoordsArray.push(vec2(s2, t2));
+            normalsArray.push(n11);
 
             pointsArray.push(vec4(x1, y1, z1, 1.0));
             colorsArray.push(green1);
             texCoordsArray.push(vec2(s1, t1));
+            normalsArray.push(n00);
 
             pointsArray.push(vec4(x2, y3, z2, 1.0));
             colorsArray.push(green2);
             texCoordsArray.push(vec2(s2, t2));
+            normalsArray.push(n11);
 
             pointsArray.push(vec4(x1, y4, z2, 1.0));
             colorsArray.push(green1);
             texCoordsArray.push(vec2(s1, t2));
+            normalsArray.push(n01);
         }
     }
 
     terrainCount = pointsArray.length - terrainStart;
 }
 
-
 function buildWater()
 {
     waterStart = pointsArray.length;
 
     var waterColor = vec4(0.0, 0.3, 0.9, 1.0);
-
+    var waterNormalVec = vec3(0.0, 1.0, 0.0);
     var y = -0.30;
     var size = 4.2;
 
-    pointsArray.push(vec4(-size, y, -size, 1.0));
-    colorsArray.push(waterColor);
-    texCoordsArray.push(vec2(0.0, 0.0));
+    var verts = [
+        vec4(-size, y, -size, 1.0),
+        vec4(size, y, -size, 1.0),
+        vec4(size, y, size, 1.0),
+        vec4(-size, y, -size, 1.0),
+        vec4(size, y, size, 1.0),
+        vec4(-size, y, size, 1.0)
+    ];
 
-    pointsArray.push(vec4(size, y, -size, 1.0));
-    colorsArray.push(waterColor);
-    texCoordsArray.push(vec2(0.0, 0.0));
-
-    pointsArray.push(vec4(size, y, size, 1.0));
-    colorsArray.push(waterColor);
-    texCoordsArray.push(vec2(0.0, 0.0));
-
-    pointsArray.push(vec4(-size, y, -size, 1.0));
-    colorsArray.push(waterColor);
-    texCoordsArray.push(vec2(0.0, 0.0));
-
-    pointsArray.push(vec4(size, y, size, 1.0));
-    colorsArray.push(waterColor);
-    texCoordsArray.push(vec2(0.0, 0.0));
-
-    pointsArray.push(vec4(-size, y, size, 1.0));
-    colorsArray.push(waterColor);
-    texCoordsArray.push(vec2(0.0, 0.0));
+    for (var i = 0; i < verts.length; i++)
+    {
+        pointsArray.push(verts[i]);
+        colorsArray.push(waterColor);
+        texCoordsArray.push(vec2(0.0, 0.0));
+        normalsArray.push(waterNormalVec);
+    }
 
     waterCount = pointsArray.length - waterStart;
 }
-
 
 function buildSkybox()
 {
     skyboxStart = pointsArray.length;
 
-    var topBlue = vec4(0.0, 0.1, 0.6, 1.0);
-    var bottomBlue = vec4(0.5, 0.8, 1.0, 1.0);
-
     var size = terrainSize * 1.5;
+    var topBlue = vec4(0.10, 0.28, 0.72, 1.0);
+    var bottomBlue = vec4(0.76, 0.88, 1.00, 1.0);
+    var n = vec3(0.0, 1.0, 0.0);
 
-    pointsArray.push(vec4(-size, -size, -size, 1.0));
-    colorsArray.push(bottomBlue);
-    texCoordsArray.push(vec2(0.0, 0.0));
+    function skyColor(y)
+    {
+        if (y > 0.0)
+        {
+            return topBlue;
+        }
 
-    pointsArray.push(vec4(size, -size, -size, 1.0));
-    colorsArray.push(bottomBlue);
-    texCoordsArray.push(vec2(0.0, 0.0));
+        return bottomBlue;
+    }
 
-    pointsArray.push(vec4(size, size, -size, 1.0));
-    colorsArray.push(topBlue);
-    texCoordsArray.push(vec2(0.0, 0.0));
+    var c = [
+        vec4(-size, -size, -size, 1.0),
+        vec4(size, -size, -size, 1.0),
+        vec4(size, size, -size, 1.0),
+        vec4(-size, size, -size, 1.0),
+        vec4(-size, -size, size, 1.0),
+        vec4(size, -size, size, 1.0),
+        vec4(size, size, size, 1.0),
+        vec4(-size, size, size, 1.0)
+    ];
 
-    pointsArray.push(vec4(-size, -size, -size, 1.0));
-    colorsArray.push(bottomBlue);
-    texCoordsArray.push(vec2(0.0, 0.0));
+    var faces = [
+        [0, 1, 2, 0, 2, 3],
+        [5, 4, 7, 5, 7, 6],
+        [4, 0, 3, 4, 3, 7],
+        [1, 5, 6, 1, 6, 2],
+        [3, 2, 6, 3, 6, 7],
+        [4, 5, 1, 4, 1, 0]
+    ];
 
-    pointsArray.push(vec4(size, size, -size, 1.0));
-    colorsArray.push(topBlue);
-    texCoordsArray.push(vec2(0.0, 0.0));
-
-    pointsArray.push(vec4(-size, size, -size, 1.0));
-    colorsArray.push(topBlue);
-    texCoordsArray.push(vec2(0.0, 0.0));
+    for (var f = 0; f < faces.length; f++)
+    {
+        for (var k = 0; k < 6; k++)
+        {
+            var v = c[faces[f][k]];
+            pointsArray.push(v);
+            colorsArray.push(skyColor(v[1]));
+            texCoordsArray.push(vec2(0.0, 0.0));
+            normalsArray.push(n);
+        }
+    }
 
     skyboxCount = pointsArray.length - skyboxStart;
 }
 
-
-// Smoother coaster path with hills, valleys, and less harsh slope changes.
 function getTrackPoint(t)
 {
     t = t % 1.0;
@@ -352,13 +372,31 @@ function getTrackPoint(t)
     return vec3(x, y, z);
 }
 
+function pushVertex(p, color, normal)
+{
+    pointsArray.push(vec4(p[0], p[1], p[2], 1.0));
+    colorsArray.push(color);
+    texCoordsArray.push(vec2(0.0, 0.0));
+    normalsArray.push(normal);
+}
+
+function pushQuad(v1, v2, v3, v4, color, normal)
+{
+    pushVertex(v1, color, normal);
+    pushVertex(v2, color, normal);
+    pushVertex(v3, color, normal);
+
+    pushVertex(v1, color, normal);
+    pushVertex(v3, color, normal);
+    pushVertex(v4, color, normal);
+}
 
 function addThickLine(p1, p2, thickness, color)
 {
     var dir = normalizeVec(subVec(p2, p1));
     var side = normalizeVec(cross(dir, up));
 
-    if (side[0] === 0 && side[1] === 0 && side[2] === 0)
+    if (side[0] === 0.0 && side[1] === 0.0 && side[2] === 0.0)
     {
         side = vec3(1.0, 0.0, 0.0);
     }
@@ -376,46 +414,23 @@ function addThickLine(p1, p2, thickness, color)
     var g = subVec(subVec(p2, offset), vertical);
     var h = subVec(addVec(p2, offset), vertical);
 
-    function pushQuad(v1, v2, v3, v4)
-    {
-        pointsArray.push(vec4(v1[0], v1[1], v1[2], 1.0));
-        colorsArray.push(color);
-        texCoordsArray.push(vec2(0.0, 0.0));
+    var nTop = vec3(0.0, 1.0, 0.0);
+    var nBottom = vec3(0.0, -1.0, 0.0);
+    var nSide1 = side;
+    var nSide2 = scaleVec(side, -1.0);
 
-        pointsArray.push(vec4(v2[0], v2[1], v2[2], 1.0));
-        colorsArray.push(color);
-        texCoordsArray.push(vec2(0.0, 0.0));
-
-        pointsArray.push(vec4(v3[0], v3[1], v3[2], 1.0));
-        colorsArray.push(color);
-        texCoordsArray.push(vec2(0.0, 0.0));
-
-        pointsArray.push(vec4(v1[0], v1[1], v1[2], 1.0));
-        colorsArray.push(color);
-        texCoordsArray.push(vec2(0.0, 0.0));
-
-        pointsArray.push(vec4(v3[0], v3[1], v3[2], 1.0));
-        colorsArray.push(color);
-        texCoordsArray.push(vec2(0.0, 0.0));
-
-        pointsArray.push(vec4(v4[0], v4[1], v4[2], 1.0));
-        colorsArray.push(color);
-        texCoordsArray.push(vec2(0.0, 0.0));
-    }
-
-    pushQuad(a, e, f, b);
-    pushQuad(d, c, g, h);
-    pushQuad(a, d, h, e);
-    pushQuad(b, f, g, c);
+    pushQuad(a, e, f, b, color, nTop);
+    pushQuad(d, c, g, h, color, nBottom);
+    pushQuad(a, d, h, e, color, nSide1);
+    pushQuad(b, f, g, c, color, nSide2);
 }
-
 
 function buildRollerCoasterTrack()
 {
     trackStart = pointsArray.length;
 
     var railColor = vec4(0.08, 0.08, 0.08, 1.0);
-    var tieColor = vec4(0.03, 0.03, 0.03, 1.0); 
+    var tieColor = vec4(0.03, 0.03, 0.03, 1.0);
 
     var segments = 420;
     var railOffset = 0.45;
@@ -435,7 +450,6 @@ function buildRollerCoasterTrack()
 
         var left1 = addVec(p1, scaleVec(side, railOffset));
         var left2 = addVec(p2, scaleVec(side, railOffset));
-
         var right1 = subVec(p1, scaleVec(side, railOffset));
         var right2 = subVec(p2, scaleVec(side, railOffset));
 
@@ -451,13 +465,10 @@ function buildRollerCoasterTrack()
     trackCount = pointsArray.length - trackStart;
 }
 
-
 function configureTexture(image)
 {
     terrainTexture = gl.createTexture();
-
     gl.bindTexture(gl.TEXTURE_2D, terrainTexture);
-
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
 
     gl.texImage2D(
@@ -471,18 +482,14 @@ function configureTexture(image)
 
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-
     gl.activeTexture(gl.TEXTURE0);
     gl.uniform1i(gl.getUniformLocation(program, "terrainTexture"), 0);
 
     useTexture = 1;
 }
 
-
-// Manual movement camera.
 function updateManualCamera()
 {
     var forward = normalizeVec(cameraForward);
@@ -519,8 +526,6 @@ function updateManualCamera()
     }
 }
 
-
-// Camera selection: auto ride POV, manual, or Anthony's orbit camera.
 function getCameraMatrix()
 {
     if (cameraMode === "auto")
@@ -566,10 +571,7 @@ function getCameraMatrix()
     if (cameraMode === "manual")
     {
         updateManualCamera();
-
-        var lookPoint = addVec(cameraPos, cameraForward);
-
-        return lookAt(cameraPos, lookPoint, up);
+        return lookAt(cameraPos, addVec(cameraPos, cameraForward), up);
     }
 
     eye = vec3(
@@ -581,42 +583,38 @@ function getCameraMatrix()
     return lookAt(eye, at, up);
 }
 
-
 window.onload = function init()
 {
     canvas = document.getElementById("gl-canvas");
-
     gl = WebGLUtils.setupWebGL(canvas);
 
     if (!gl)
     {
         alert("WebGL isn't available");
+        return;
     }
 
     gl.viewport(0, 0, canvas.width, canvas.height);
-
     gl.clearColor(0.7, 0.9, 1.0, 1.0);
-
     gl.enable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
     program = initShaders(gl, "vertex-shader", "fragment-shader");
-
     gl.useProgram(program);
 
+    startTime = performance.now();
+    updateCameraDirection();
+
     generateTerrainData(terrainRows, terrainCols);
-
     buildTerrain();
-
     buildWater();
-
     buildSkybox();
-
     buildRollerCoasterTrack();
 
     cBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, cBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, flatten(colorsArray), gl.STATIC_DRAW);
-
     var vColor = gl.getAttribLocation(program, "vColor");
     gl.vertexAttribPointer(vColor, 4, gl.FLOAT, false, 0, 0);
     gl.enableVertexAttribArray(vColor);
@@ -624,66 +622,66 @@ window.onload = function init()
     tBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, tBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, flatten(texCoordsArray), gl.STATIC_DRAW);
-
     var vTexCoord = gl.getAttribLocation(program, "vTexCoord");
     gl.vertexAttribPointer(vTexCoord, 2, gl.FLOAT, false, 0, 0);
     gl.enableVertexAttribArray(vTexCoord);
 
+    nBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, nBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, flatten(normalsArray), gl.STATIC_DRAW);
+    var vNormal = gl.getAttribLocation(program, "vNormal");
+    gl.vertexAttribPointer(vNormal, 3, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(vNormal);
+
     vBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, vBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, flatten(pointsArray), gl.STATIC_DRAW);
-
     var vPosition = gl.getAttribLocation(program, "vPosition");
     gl.vertexAttribPointer(vPosition, 4, gl.FLOAT, false, 0, 0);
     gl.enableVertexAttribArray(vPosition);
 
     modelView = gl.getUniformLocation(program, "modelView");
-
     projection = gl.getUniformLocation(program, "projection");
+    uSurfaceTypeLoc = gl.getUniformLocation(program, "uSurfaceType");
+    uUseTextureLoc = gl.getUniformLocation(program, "uUseTexture");
+    uIsWaterLoc = gl.getUniformLocation(program, "uIsWater");
+    uTimeLoc = gl.getUniformLocation(program, "uTime");
 
-    useTextureLoc = gl.getUniformLocation(program, "useTexture");
+    document.getElementById("Button1").onclick = function()
+    {
+        cameraMode = "orbit";
+        radius *= 1.1;
+    };
 
-    document.getElementById("Button1").onclick =
-        function()
-        {
-            cameraMode = "orbit";
-            radius *= 1.1;
-        };
+    document.getElementById("Button2").onclick = function()
+    {
+        cameraMode = "orbit";
+        radius *= 0.9;
+    };
 
-    document.getElementById("Button2").onclick =
-        function()
-        {
-            cameraMode = "orbit";
-            radius *= 0.9;
-        };
+    document.getElementById("Button3").onclick = function()
+    {
+        cameraMode = "orbit";
+        theta += dr;
+    };
 
-    document.getElementById("Button3").onclick =
-        function()
-        {
-            cameraMode = "orbit";
-            theta += dr;
-        };
+    document.getElementById("Button4").onclick = function()
+    {
+        cameraMode = "orbit";
+        theta -= dr;
+    };
 
-    document.getElementById("Button4").onclick =
-        function()
-        {
-            cameraMode = "orbit";
-            theta -= dr;
-        };
+    document.getElementById("Button5").onclick = function()
+    {
+        cameraMode = "orbit";
+        phi += dr;
+    };
 
-    document.getElementById("Button5").onclick =
-        function()
-        {
-            cameraMode = "orbit";
-            phi += dr;
-        };
-
-    document.getElementById("Button6").onclick =
-        function()
-        {
-            cameraMode = "orbit";
-            phi -= dr;
-        };
+    document.getElementById("Button6").onclick = function()
+    {
+        cameraMode = "orbit";
+        phi -= dr;
+    };
 
     document.getElementById("heightmapInput").onchange = function(event)
     {
@@ -705,96 +703,109 @@ window.onload = function init()
     };
 
     window.onkeydown = function(event)
-{
-    keys[event.key.toLowerCase()] = true;
-    keys[event.code] = true;
-
-    if (event.code === "Space" || event.code === "ShiftLeft" || event.code === "ShiftRight")
     {
-        event.preventDefault();
-    }
+        keys[event.key.toLowerCase()] = true;
+        keys[event.code] = true;
 
-    if (event.key.toLowerCase() === "r")
+        if (
+            event.code === "Space" ||
+            event.code === "ShiftLeft" ||
+            event.code === "ShiftRight" ||
+            event.key.indexOf("Arrow") === 0
+        )
+        {
+            event.preventDefault();
+        }
+
+        if (event.key.toLowerCase() === "r")
+        {
+            cameraMode = "auto";
+        }
+
+        if (event.key.toLowerCase() === "m")
+        {
+            cameraMode = "manual";
+        }
+
+        if (event.key.toLowerCase() === "o")
+        {
+            cameraMode = "orbit";
+        }
+
+        if (event.key === "ArrowLeft")
+        {
+            yaw -= 3.0;
+        }
+
+        if (event.key === "ArrowRight")
+        {
+            yaw += 3.0;
+        }
+
+        if (event.key === "ArrowUp")
+        {
+            pitch += 2.0;
+        }
+
+        if (event.key === "ArrowDown")
+        {
+            pitch -= 2.0;
+        }
+
+        if (pitch > 85.0)
+        {
+            pitch = 85.0;
+        }
+
+        if (pitch < -85.0)
+        {
+            pitch = -85.0;
+        }
+
+        updateCameraDirection();
+    };
+
+    window.onkeyup = function(event)
     {
-        cameraMode = "auto";
-    }
-
-    if (event.key.toLowerCase() === "m")
-    {
-        cameraMode = "manual";
-    }
-
-    if (event.key.toLowerCase() === "o")
-    {
-        cameraMode = "orbit";
-    }
-
-    if (event.key === "ArrowLeft")
-    {
-        yaw -= 3.0;
-    }
-
-    if (event.key === "ArrowRight")
-    {
-        yaw += 3.0;
-    }
-
-    if (event.key === "ArrowUp")
-    {
-        pitch += 2.0;
-    }
-
-    if (event.key === "ArrowDown")
-    {
-        pitch -= 2.0;
-    }
-
-    if (pitch > 85.0)
-    {
-        pitch = 85.0;
-    }
-
-    if (pitch < -85.0)
-    {
-        pitch = -85.0;
-    }
-
-    updateCameraDirection();
-};
-
-window.onkeyup = function(event)
-{
-    keys[event.key.toLowerCase()] = false;
-    keys[event.code] = false;
-};
+        keys[event.key.toLowerCase()] = false;
+        keys[event.code] = false;
+    };
 
     render();
 };
-
 
 function render()
 {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    mvMatrix = getCameraMatrix();
+    var elapsed = ((performance.now() - startTime) / 1000.0) % TWO_PI;
+    gl.uniform1f(uTimeLoc, elapsed);
 
+    mvMatrix = getCameraMatrix();
     pMatrix = perspective(65.0, canvas.width / canvas.height, 0.1, 100.0);
 
     gl.uniformMatrix4fv(modelView, false, flatten(mvMatrix));
     gl.uniformMatrix4fv(projection, false, flatten(pMatrix));
 
-    gl.uniform1i(useTextureLoc, 0);
+    gl.uniform1f(uSurfaceTypeLoc, 0.0);
+    gl.uniform1f(uUseTextureLoc, 0.0);
+    gl.uniform1f(uIsWaterLoc, 0.0);
     gl.drawArrays(gl.TRIANGLES, skyboxStart, skyboxCount);
 
-    gl.uniform1i(useTextureLoc, useTexture);
+    gl.uniform1f(uSurfaceTypeLoc, 1.0);
+    gl.uniform1f(uUseTextureLoc, useTexture);
+    gl.uniform1f(uIsWaterLoc, 0.0);
     gl.drawArrays(gl.TRIANGLES, terrainStart, terrainCount);
 
-    gl.uniform1i(useTextureLoc, 0);
+    gl.uniform1f(uSurfaceTypeLoc, 2.0);
+    gl.uniform1f(uUseTextureLoc, 0.0);
+    gl.uniform1f(uIsWaterLoc, 1.0);
     gl.drawArrays(gl.TRIANGLES, waterStart, waterCount);
 
-    gl.uniform1i(useTextureLoc, 0);
-    gl.lineWidth(4.0);
-    gl.drawArrays(gl.LINES, trackStart, trackCount);
+    gl.uniform1f(uSurfaceTypeLoc, 3.0);
+    gl.uniform1f(uUseTextureLoc, 0.0);
+    gl.uniform1f(uIsWaterLoc, 0.0);
+    gl.drawArrays(gl.TRIANGLES, trackStart, trackCount);
 
     requestAnimFrame(render);
 }
