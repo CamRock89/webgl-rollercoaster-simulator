@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WebGL Rollercoaster Simulator</title>
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: black;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 10;
+            background: rgba(0, 0, 0, 0.45);
+            padding: 10px;
+            border-radius: 8px;
+        }
+
+        canvas {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+    </style>
+
+<script id="vertex-shader" type="x-shader/x-vertex">
+
+attribute vec4 vPosition;
+attribute vec4 vColor;
+attribute vec2 vTexCoord;
+
+varying vec4 fColor;
+varying vec2 fTexCoord;
+
+uniform mat4 modelView;
+uniform mat4 projection;
+
+void main()
+{
+    gl_Position = projection * modelView * vPosition;
+    fColor = vColor;
+    fTexCoord = vTexCoord;
+}
+
+</script>
+
+<script id="fragment-shader" type="x-shader/x-fragment">
+
+precision mediump float;
+
+varying vec4 fColor;
+varying vec2 fTexCoord;
+
+uniform sampler2D terrainTexture;
+uniform int useTexture;
+
+void main()
+{
+    if (useTexture == 1)
+    {
+        gl_FragColor = texture2D(terrainTexture, fTexCoord);
+    }
+    else
+    {
+        gl_FragColor = fColor;
+    }
+}
+
+</script>
+
+</head>
+
+<body>
+
+<div id="ui">
+    <button id="Button1">Increase Radius</button>
+    <button id="Button2">Decrease Radius</button>
+    <button id="Button3">Theta +</button>
+    <button id="Button4">Theta -</button>
+    <button id="Button5">Phi +</button>
+    <button id="Button6">Phi -</button>
+
+    <p></p>
+
+    <label>Load Terrain Texture:</label>
+    <input type="file" id="heightmapInput" accept="image/*">
+
+    <p>
+        <strong>Controls:</strong><br>
+        R = Auto Ride<br>
+        M = Manual Camera<br>
+        O = Original Orbit Camera<br>
+        W/S = Forward/Back<br>
+        A/D = Left/Right<br>
+        Q/E = Up/Down
+    </p>
+</div>
+
+<canvas id="gl-canvas" width="1000" height="800">
+Your browser does not support HTML5 canvas
+</canvas>
+
+<script src="lib/webgl-utils.js"></script>
+<script src="lib/initShaders.js"></script>
+<script src="lib/MV.js"></script>
+<script src="phase1.js"></script>
+
+</body>
+</html>

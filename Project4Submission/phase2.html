@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Project 4</title>
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: black;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 10;
+            background: rgba(0, 0, 0, 0.45);
+            padding: 10px;
+            border-radius: 8px;
+        }
+
+        canvas {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+    </style>
+
+
+<script id="vertex-shader" type="x-shader/x-vertex">
+
+attribute vec4 vPosition;
+attribute vec4 vColor;
+attribute vec2 vTexCoord;
+attribute vec3 vNormal;
+
+varying vec4  fColor;
+varying vec2  fTexCoord;
+varying vec3  fNormal;
+varying vec3  fPosition;
+varying vec3  fWorldPos;   
+
+uniform mat4  modelView;
+uniform mat4  projection;
+uniform float uTime;
+uniform float uIsWater;
+
+const float skySize = 45.0;
+
+void main()
+{
+    vec4 pos = vPosition;
+
+    float wx   = pos.x * 1.2 + uTime * 1.3;
+    float wz   = pos.z * 1.4 + uTime * 0.9;
+
+    float wave = 0.045 * sin(wx)
+               + 0.030 * sin(wz + 1.1)
+               + 0.020 * sin(pos.x * 2.5 - uTime * 2.0);
+
+    pos.y += wave * uIsWater;
+
+    gl_Position = projection * modelView * pos;
+
+    fColor    = vColor;
+    fTexCoord = vTexCoord;
+
+    fPosition = pos.xyz;       
+    fWorldPos = vPosition.xyz; 
+
+    fNormal   = vNormal;
+}
+
+</script>
+
+
+<script id="fragment-shader" type="x-shader/x-fragment">
+
+precision highp float;
+precision highp int;
+
+varying vec4  fColor;
+varying vec2  fTexCoord;
+varying vec3  fNormal;
+varying vec3  fPosition;
+varying vec3  fWorldPos;
+
+uniform sampler2D terrainTexture;
+uniform float     uUseTexture;
+uniform float     uSurfaceType;
+uniform float     uTime;
+
+const vec3 sunDir   = vec3(0.0, 1.0, 0.0);
+const vec3 sunColor = vec3(1.0, 0.97, 0.85);
+
+const vec3 viewDir = vec3(0.0891, 0.8909, 0.4454);
+
+/* sky */
+const vec3 skyHorizon = vec3(0.76, 0.88, 1.00);
+const vec3 skyZenith  = vec3(0.10, 0.28, 0.72);
+
+/* materials */
+const vec3 terrKa = vec3(0.12, 0.22, 0.08);
+const vec3 terrKd = vec3(0.25, 0.65, 0.20);
+const vec3 terrKs = vec3(0.18, 0.18, 0.10);
+
+const vec3 waterKa = vec3(0.00, 0.08, 0.22);
+const vec3 waterKd = vec3(0.05, 0.30, 0.75);
+const vec3 waterKs = vec3(0.80, 0.90, 1.00);
+
+const vec3 trackKd = vec3(0.55, 0.25, 0.05);
+
+/* sky function */
+vec3 sky(vec3 dir)
+{
+    float t = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
+    return mix(skyHorizon, skyZenith, t);
+}
+
+/* phong */
+vec3 phong(vec3 baseColor, vec3 Ka, vec3 Kd, vec3 Ks, float shininess, vec3 N)
+{
+    float diff = max(dot(N, sunDir), 0.0);
+    float spec = pow(max(dot(reflect(-sunDir, N), viewDir), 0.0), shininess);
+
+    vec3 ambient = Ka * sunColor * 0.35;
+    vec3 diffuse = Kd * sunColor * baseColor * diff;
+    vec3 specular = Ks * sunColor * spec;
+
+    return ambient + diffuse + specular;
+}
+
+/* stable bump mapping */
+vec3 waterNormal(vec2 pos, float time)
+{
+    float wx = pos.x * 1.2 + time * 1.3;
+    float wz = pos.y * 1.4 + time * 0.9;
+
+    float dx =
+        0.045 * 1.2 * cos(wx) +
+        0.020 * 2.5 * cos(pos.x * 2.5 - time * 2.0);
+
+    float dz =
+        0.030 * 1.4 * cos(wz + 1.1);
+
+    return normalize(vec3(-dx, 1.0, -dz));
+}
+
+/* fresnel */
+float fresnel(vec3 N, vec3 V)
+{
+    float f = 1.0 - max(dot(N, V), 0.0);
+    return pow(f, 3.0);
+}
+
+void main()
+{
+    /* SKY */
+    if (uSurfaceType < 0.5)
+    {
+        gl_FragColor = vec4(sky(normalize(fPosition)), 1.0);
+        return;
+    }
+
+    vec3 N = normalize(fNormal);
+
+    /* TERRAIN */
+    if (uSurfaceType < 1.5)
+    {
+        vec3 base = (uUseTexture > 0.5)
+            ? texture2D(terrainTexture, fTexCoord).rgb
+            : fColor.rgb;
+
+        vec3 col = phong(base, terrKa, terrKd, terrKs, 18.0, N);
+
+        float f = fresnel(N, viewDir);
+        vec3 refl = sky(reflect(vec3(0.0,1.0,0.0), N));
+
+        col += refl * f * 0.12;
+
+        gl_FragColor = vec4(col, 1.0);
+        return;
+    }
+
+    /* WATER (FIXED + SAFE BUMP MAPPING) */
+    if (uSurfaceType < 2.5)
+    {
+        vec3 Nw = waterNormal(fWorldPos.xz, uTime);
+
+        vec3 base = phong(waterKd, waterKa, waterKd, waterKs, 96.0, Nw);
+
+        float f = fresnel(Nw, viewDir);
+
+        vec3 refl = sky(vec3(Nw.x, -Nw.y, Nw.z));
+
+        vec3 col = mix(base, refl, f);
+
+        gl_FragColor = vec4(col, 0.88);
+        return;
+    }
+
+    /* TRACK */
+    if (uSurfaceType < 3.5)
+    {
+        gl_FragColor = vec4(phong(trackKd, trackKd, trackKd, trackKd, 12.0, N), 1.0);
+        return;
+    }
+
+    gl_FragColor = fColor;
+}
+
+</script>
+
+</head>
+
+<body>
+
+<div id="ui">
+    <button id="Button1">Increase Radius</button>
+    <button id="Button2">Decrease Radius</button>
+    <button id="Button3">Theta +</button>
+    <button id="Button4">Theta -</button>
+    <button id="Button5">Phi +</button>
+    <button id="Button6">Phi -</button>
+
+    <p></p>
+
+    <label>Load Terrain Texture:</label>
+    <input type="file" id="heightmapInput">
+
+    <p>
+        R = Auto Ride<br>
+        M = Manual Camera<br>
+        O = Orbit Camera<br>
+        WASD = Move<br>
+        Q/E = Up/Down
+    </p>
+</div>
+
+<canvas id="gl-canvas" width="1000" height="800"></canvas>
+
+<script src="lib/webgl-utils.js"></script>
+<script src="lib/initShaders.js"></script>
+<script src="lib/MV.js"></script>
+<script src="phase2.js"></script>
+
+</body>
+</html>

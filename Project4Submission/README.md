@@ -1,4 +1,7 @@
 This project was divided into three parts among our group members.
+
+We were unable to provide code snapshots of each phase however our entire commit history is available on the GitHub repo.
+
 The project was uploaded and managed in a GitHub repository where each member worked on his respective branch
 
 as a contributor of the repo. Commits, pull requests, and merges as each member worked are documented there.
@@ -25,13 +28,14 @@ c. Trees, rocks, and houses
 d. Terrain image loading and random object placement
 
 Cameron:
-a. Roller coaster track geometry 
+a. Roller coaster track geometry
 
 b. Auto ride camera
 
 c. Camera movement direction logic and manual camera controls
 
 d. Keyboard movement system
+
 
 Project Phases:
 Phase 1: Cameron's basic track and camera implementation coupled with Anthony's preliminary work for terrain generation and file upload.
@@ -40,5 +44,4 @@ Phase 3: Cameron's refined camera system and track improving on the original imp
 Phase 4: Anthony's trees, rocks, and houses random generation along with bump mapping fixes from Devin.
 
 Note: This is only a rough idea of the work that occurred since we had some technical issues with dependencies like MV.js, initshaders.js, and webgl-utils.js. A timeline of the work is visible on github via our commits, pull requests, and merges. Everyone seems to have contributed evenly to the final state of the project.
-
 
