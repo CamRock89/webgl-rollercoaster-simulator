@@ -79,7 +79,7 @@ var startTime = null;
 
 var landscapeStart = 0;
 var landscapeCount = 0;
-var randomSeed = 7;
+var randomSeed = Math.floor(Math.random() * 100000);
 
 function addVec(a, b)
 {
@@ -488,6 +488,28 @@ function getTerrainHeight(x, z)
     return terrainData[i][j];
 }
 
+function nearTrack(x, z)
+{
+    var samples = 80;
+
+    for (var i = 0; i < samples; i++)
+    {
+        var p = getTrackPoint(i / samples);
+
+        var dx = x - p[0];
+        var dz = z - p[2];
+
+        var dist = Math.sqrt(dx * dx + dz * dz);
+
+        if (dist < 1.8)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 function addBox(cx, cy, cz, sx, sy, sz, color)
 {
     var x1 = cx - sx / 2.0;
@@ -550,25 +572,48 @@ function buildLandscape()
     buildStand(5.0, 10.5);
 
     var stationY = getTerrainHeight(0.0, 11.5);
-    addBox(0.0, stationY + 0.45, 11.5, 4.0, 0.9, 2.0, vec4(0.55, 0.32, 0.12, 1.0));
-    addBox(0.0, stationY + 1.10, 11.5, 4.5, 0.35, 2.4, vec4(0.25, 0.05, 0.05, 1.0));
 
-    /* random trees, avoiding the lake */
-    for (var i = 0; i < 45; i++)
+    addBox(
+        0.0,
+        stationY + 0.45,
+        11.5,
+        4.0,
+        0.9,
+        2.0,
+        vec4(0.55, 0.32, 0.12, 1.0)
+    );
+
+    addBox(
+        0.0,
+        stationY + 1.10,
+        11.5,
+        4.5,
+        0.35,
+        2.4,
+        vec4(0.25, 0.05, 0.05, 1.0)
+    );
+
+    /* random trees, avoiding lake and track */
+    var treesPlaced = 0;
+
+    while (treesPlaced < 45)
     {
         var x = seededRandom() * terrainSize - terrainSize / 2.0;
         var z = seededRandom() * terrainSize - terrainSize / 2.0;
 
-        var dist = Math.sqrt(x * x + z * z);
+        var distFromLake = Math.sqrt(x * x + z * z);
 
-        if (dist > 5.5)
+        if (distFromLake > 5.5 && !nearTrack(x, z))
         {
             buildTree(x, z);
+            treesPlaced++;
         }
     }
 
-    /* random rocks near water and hills */
-    for (var j = 0; j < 18; j++)
+    /* random rocks near water but not on track */
+    var rocksPlaced = 0;
+
+    while (rocksPlaced < 18)
     {
         var angle = seededRandom() * TWO_PI;
         var r = 4.8 + seededRandom() * 3.0;
@@ -576,7 +621,11 @@ function buildLandscape()
         var rx = Math.cos(angle) * r;
         var rz = Math.sin(angle) * r;
 
-        buildRock(rx, rz);
+        if (!nearTrack(rx, rz))
+        {
+            buildRock(rx, rz);
+            rocksPlaced++;
+        }
     }
 
     landscapeCount = pointsArray.length - landscapeStart;
